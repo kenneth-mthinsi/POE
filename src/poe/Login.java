@@ -15,10 +15,15 @@ package poe;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionEvent;
 import java.io.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledDocument;
 
 public class Login extends JFrame {
     // UI fields for login/registration
@@ -265,6 +270,7 @@ public class Login extends JFrame {
 
     /**
      * Main method: launches the Login interface as the entry point of the application.
+     * @param args
      */
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new Login());
@@ -276,43 +282,90 @@ public class Login extends JFrame {
  * It lets the user send messages to a recipient (specified by phone number) and
  * displays the chat history in a text area. The class stores messages in an ArrayList.
  */
-class QuickChat extends JFrame {
+   
+    class QuickChat extends JFrame {
     private final String currentUser;
-    private final JTextArea chatArea;       // Area to display chat history.
-    private final JTextField phoneNumberField; // Input field for recipient's phone number.
-    private final JTextField messageField;  // Input field for typing the message.
-    private final ArrayList<String> messageHistory; // List to store sent messages.
+    private final JTextPane chatPane;             // For rich styled text.
+    private final StyledDocument chatDocument;
+    private final JTextField phoneNumberField;      // Input field for recipient's phone number.
+    private final JTextField messageField;          // Input field for typing the message.
+    private final ArrayList<ChatMessage> messageHistory;  // List to store all messages.
+    private final ArrayList<ChatMessage> deletedMessages; // Deleted messages (for recovery).
+    private JLabel statusLabel;                     // Label to display recipient’s online status.
+    private boolean recipientOnline = true;         // Simulated online status flag.
+
+    // Enum for tracking message tick status.
+    private enum MessageStatus {
+        SENT, DELIVERED, READ
+    }
+
+    // Inner class to store chat message details.
+    private class ChatMessage {
+        String sender;         // "You" for user messages or "AI Bot" for bot responses.
+        String messageText;    // The actual message content.
+        MessageStatus status;  // Tick status (only applicable for user messages).
+        boolean isFromUser;    // True if message originated from the user.
+
+        ChatMessage(String sender, String messageText, MessageStatus status, boolean isFromUser) {
+            this.sender = sender;
+            this.messageText = messageText;
+            this.status = status;
+            this.isFromUser = isFromUser;
+        }
+    }
 
     /**
-     * Constructor for QuickChat: sets up the chat interface using Swing components.
-     * @param username The username (passed from Login) used in the welcome message.
+     * Constructor: sets up the chat interface with header, chat area, and input panel including extra buttons.
+     * @param username The current user's name.
      */
     public QuickChat(String username) {
         this.currentUser = username;
         messageHistory = new ArrayList<>();
+        deletedMessages = new ArrayList<>();
 
-        // Configure the QuickChat window.
+        // Configure the main window.
         setTitle("QuickChat");
-        setExtendedState(JFrame.MAXIMIZED_BOTH); // Full-screen mode.
+        setExtendedState(JFrame.MAXIMIZED_BOTH);  // Full-screen mode.
         setUndecorated(true);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
-        // NORTH: Display a welcome message using the current user's name.
+        // ---- HEADER PANEL: Welcome & Online Status ----
         JLabel welcomeLabel = new JLabel("Welcome to QuickChat, " + currentUser + "!");
         welcomeLabel.setFont(new Font("Arial", Font.PLAIN, 16));
-        welcomeLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        add(welcomeLabel, BorderLayout.NORTH);
 
-        // CENTER: Create a non-editable text area for chat messages wrapped in a scroll pane.
-        chatArea = new JTextArea();
-        chatArea.setEditable(false);
-        chatArea.setFont(new Font("Arial", Font.PLAIN, 14));
-        JScrollPane scrollPane = new JScrollPane(chatArea);
+        statusLabel = new JLabel("Recipient Status: Online");
+        statusLabel.setFont(new Font("Arial", Font.PLAIN, 16));
+        statusLabel.setForeground(Color.GREEN);
+
+        JButton toggleStatusButton = new JButton("Toggle Recipient Status");
+        toggleStatusButton.addActionListener(e -> {
+            // Toggle recipient online status and update color.
+            recipientOnline = !recipientOnline;
+            statusLabel.setText("Recipient Status: " + (recipientOnline ? "Online" : "Offline"));
+            statusLabel.setForeground(recipientOnline ? Color.GREEN : Color.RED);
+            // If recipient comes online, update pending messages.
+            if (recipientOnline) {
+                updatePendingMessages();
+            }
+        });
+
+        JPanel headerPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        headerPanel.add(welcomeLabel);
+        headerPanel.add(statusLabel);
+        headerPanel.add(toggleStatusButton);
+        add(headerPanel, BorderLayout.NORTH);
+
+        // ---- CHAT AREA ----
+        chatPane = new JTextPane();
+        chatPane.setEditable(false);
+        chatPane.setFont(new Font("Arial", Font.PLAIN, 14));
+        chatDocument = chatPane.getStyledDocument();
+        JScrollPane scrollPane = new JScrollPane(chatPane);
         add(scrollPane, BorderLayout.CENTER);
 
-        // SOUTH: Build an input panel with fields for entering the recipient's phone number and message.
-        JPanel inputPanel = new JPanel(new GridLayout(4, 2, 5, 5));
+        // ---- INPUT PANEL (South) ----
+        JPanel inputPanel = new JPanel(new GridLayout(5, 2, 5, 5));
         inputPanel.add(new JLabel("Recipient Phone Number:"));
         phoneNumberField = new JTextField();
         inputPanel.add(phoneNumberField);
@@ -321,29 +374,36 @@ class QuickChat extends JFrame {
         messageField = new JTextField();
         inputPanel.add(messageField);
 
-        // Create a button for sending messages.
         JButton sendButton = new JButton("Send");
         inputPanel.add(sendButton);
 
-        // Create a button to display the history of messages.
         JButton viewHistoryButton = new JButton("View Message History");
         inputPanel.add(viewHistoryButton);
 
+        JButton deleteButton = new JButton("Delete Last Message");
+        inputPanel.add(deleteButton);
+
+        JButton recoverButton = new JButton("Recover Deleted Messages");
+        inputPanel.add(recoverButton);
+
+        JButton exitButton = new JButton("Exit");
+        inputPanel.add(exitButton);
+
         add(inputPanel, BorderLayout.SOUTH);
 
-        // Button actions: log the message when "Send" is pressed,
-        // and display the message history when "View Message History" is pressed.
+        // ---- BUTTON ACTIONS ----
         sendButton.addActionListener(e -> logMessage());
-        viewHistoryButton.addActionListener(e -> displayMessageHistory());
+        viewHistoryButton.addActionListener(e -> viewMessageHistory());
+        deleteButton.addActionListener(e -> deleteLastMessage());
+        recoverButton.addActionListener(e -> recoverDeletedMessages());
+        exitButton.addActionListener(e -> System.exit(0));
 
         setVisible(true);
     }
 
     /**
-     * Logs a message to the chat.
-     * The method retrieves the input recipient phone number and message text,
-     * validates that neither is empty, formats the message, appends it to the chat area,
-     * and clears the input fields afterwards.
+     * Logs a new message when "Send" is pressed. Validates input, creates a ChatMessage,
+     * schedules tick status updates, and triggers an AI Bot response if applicable.
      */
     private void logMessage() {
         String phoneNumber = phoneNumberField.getText().trim();
@@ -353,24 +413,210 @@ class QuickChat extends JFrame {
             JOptionPane.showMessageDialog(this, "Phone number and message cannot be empty!");
             return;
         }
+        
+        // Check if the user is conversing with the AI Bot.
+        boolean chattingWithBot = phoneNumber.equalsIgnoreCase("AI") || phoneNumber.equalsIgnoreCase("bot");
+        
+        // Create the user's outgoing message.
+        ChatMessage newMsg = new ChatMessage("You", "To " + phoneNumber + ": " + messageText,
+                                               MessageStatus.SENT, true);
+        messageHistory.add(newMsg);
+        refreshChatArea();
 
-        String logEntry = "To " + phoneNumber + ": " + messageText;
-        messageHistory.add(logEntry);
-        chatArea.append(logEntry + "\n");
-
-        // Clear fields after sending.
+        // Clear the input fields.
         phoneNumberField.setText("");
         messageField.setText("");
+
+        // For AI Bot conversation, force the recipient to be online.
+        if (chattingWithBot) {
+            recipientOnline = true;
+            statusLabel.setText("Recipient Status: Online (AI Bot)");
+            statusLabel.setForeground(Color.GREEN);
+            scheduleTickUpdate(newMsg);
+
+            // After a delay, trigger the AI Bot response.
+            new Timer(3000, (ActionEvent e) -> {
+                botRespond(messageText);
+                ((Timer)e.getSource()).stop();
+            }).start();
+        } else {
+            scheduleTickUpdate(newMsg);
+        }
     }
 
     /**
-     * Displays the full message history in a dialog box.
+     * Schedules timers to update a message's tick status:
+     * – After 2 seconds: updates SENT to DELIVERED.
+     * – After 4 seconds: updates DELIVERED to READ.
+     * @param msg The message to update.
      */
-    private void displayMessageHistory() {
+    private void scheduleTickUpdate(ChatMessage msg) {
+        if (msg.isFromUser && recipientOnline) {
+            new Timer(2000, (ActionEvent e) -> {
+                if (recipientOnline && msg.status == MessageStatus.SENT) {
+                    msg.status = MessageStatus.DELIVERED;
+                    refreshChatArea();
+                }
+                ((Timer)e.getSource()).stop();
+            }).start();
+
+            new Timer(4000, (ActionEvent e) -> {
+                if (recipientOnline && msg.status == MessageStatus.DELIVERED) {
+                    msg.status = MessageStatus.READ;
+                    refreshChatArea();
+                }
+                ((Timer)e.getSource()).stop();
+            }).start();
+        }
+    }
+
+    /**
+     * Updates any pending messages (still marked as SENT) to DELIVERED when the recipient comes online,
+     * and schedules further update to READ.
+     */
+    private void updatePendingMessages() {
+        for (ChatMessage m : messageHistory) {
+            if (m.isFromUser && m.status == MessageStatus.SENT) {
+                m.status = MessageStatus.DELIVERED;
+            }
+        }
+        refreshChatArea();
+        for (ChatMessage m : messageHistory) {
+            if (m.isFromUser && m.status == MessageStatus.DELIVERED) {
+                new Timer(2000, (ActionEvent e) -> {
+                    if (recipientOnline && m.status == MessageStatus.DELIVERED) {
+                        m.status = MessageStatus.READ;
+                        refreshChatArea();
+                    }
+                    ((Timer)e.getSource()).stop();
+                }).start();
+            }
+        }
+    }
+
+    /**
+     * Simulates an AI Bot response using simple keyword-based logic.
+     * @param userMsg The user's original message.
+     */
+    private void botRespond(String userMsg) {
+        String response = getBotResponse(userMsg);
+        // AI Bot messages are automatically displayed as READ.
+        ChatMessage botMsg = new ChatMessage("AI Bot", response, MessageStatus.READ, false);
+        messageHistory.add(botMsg);
+        refreshChatArea();
+    }
+
+    /**
+     * Provides a basic response based on keywords.
+     * @param userMsg The user's message.
+     * @return The AI Bot's response.
+     */
+    private String getBotResponse(String userMsg) {
+        String lowerMsg = userMsg.toLowerCase();
+        if (lowerMsg.contains("hello")) {
+            return "Hello there! How can I help you today?";
+        } else if (lowerMsg.contains("how are you")) {
+            return "I'm doing great, thanks for asking!";
+        } else if (lowerMsg.contains("bye")) {
+            return "Goodbye! Have a nice day!";
+        } else {
+            return "I'm not sure I understand. Could you please elaborate?";
+        }
+    }
+
+    /**
+     * Refreshes the chat pane by clearing and reappending every message in the history,
+     * using styled text to include message tick markers.
+     */
+    private void refreshChatArea() {
+        chatPane.setText("");
+        for (ChatMessage msg : messageHistory) {
+            appendMessageToChat(msg);
+        }
+    }
+
+    /**
+     * Appends a single ChatMessage to the chat pane along with its tick markers.
+     * @param msg The message to display.
+     */
+    private void appendMessageToChat(ChatMessage msg) {
+        try {
+            // Base style for the message.
+            SimpleAttributeSet normal = new SimpleAttributeSet();
+            StyleConstants.setFontFamily(normal, "Arial");
+            StyleConstants.setFontSize(normal, 14);
+
+            // Create the message line.
+            String line = msg.sender + ": " + msg.messageText;
+            chatDocument.insertString(chatDocument.getLength(), line, normal);
+
+            // Append tick markers for user messages.
+            if (msg.isFromUser) {
+                String tick = "";
+                SimpleAttributeSet tickStyle = new SimpleAttributeSet();
+                StyleConstants.setFontFamily(tickStyle, "Arial");
+                StyleConstants.setFontSize(tickStyle, 12);
+                if (null != msg.status) switch (msg.status) {
+                    case SENT -> {
+                        tick = "  ✓ (Sent)";
+                        StyleConstants.setForeground(tickStyle, Color.GRAY);
+                    }
+                    case DELIVERED -> {
+                        tick = "  ✓✓ (Delivered)";
+                        StyleConstants.setForeground(tickStyle, Color.GRAY);
+                    }
+                    case READ -> {
+                        tick = "  ✓✓ (Read)";
+                        StyleConstants.setForeground(tickStyle, Color.BLUE);
+                    }
+                    default -> {
+                    }
+                }
+                chatDocument.insertString(chatDocument.getLength(), tick, tickStyle);
+            }
+            chatDocument.insertString(chatDocument.getLength(), "\n", normal);
+        } catch (BadLocationException e) {
+        }
+    }
+
+    /**
+     * Displays the full message history (with tick statuses) in a dialog.
+     */
+    private void viewMessageHistory() {
         StringBuilder history = new StringBuilder();
-        for (String msg : messageHistory) {
-            history.append(msg).append("\n");
+        for (ChatMessage msg : messageHistory) {
+            history.append(msg.sender)
+                   .append(": ")
+                   .append(msg.messageText)
+                   .append(" [")
+                   .append(msg.status)
+                   .append("]\n");
         }
         JOptionPane.showMessageDialog(this, history.toString(), "Message History", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * Deletes the last message from the history and moves it to a deleted messages list.
+     */
+    private void deleteLastMessage() {
+        if (!messageHistory.isEmpty()) {
+            ChatMessage removed = messageHistory.remove(messageHistory.size() - 1);
+            deletedMessages.add(removed);
+            refreshChatArea();
+        }
+    }
+
+    /**
+     * Recovers all deleted messages back into the main message history.
+     */
+    private void recoverDeletedMessages() {
+        if (deletedMessages.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No deleted messages to recover.");
+            return;
+        }
+        messageHistory.addAll(deletedMessages);
+        deletedMessages.clear();
+        refreshChatArea();
+        
     }
 }
