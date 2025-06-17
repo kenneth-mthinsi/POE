@@ -1,0 +1,9 @@
+You: hello
+Bot is typing...
+Bot: Hey there, Junior mthinsi! How can I assist you today? 😊
+You: what the wearther like today
+Bot is typing...
+Bot: I'm not sure how to respond to that. Could you rephrase it? 🤔
+You: how are you doing
+Bot is typing...
+Bot: I'm not sure how to respond to that. Could you rephrase it? 🤔

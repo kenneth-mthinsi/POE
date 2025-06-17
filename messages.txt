@@ -1,0 +1,15 @@
+Message ID: 0676631102
+Recipient: +27724731616
+Message: hello slash
+Message Hash: 06:HELLO:SLASH
+------
+Message ID: 0695083318
+Recipient: +27724731616
+Message: slash!!!!!!
+Message Hash: 06:SLASH!!!!!!:
+------
+Message ID: 0994160060
+Recipient: +2772471616
+Message: wola
+Message Hash: 09:WOLA:
+------
