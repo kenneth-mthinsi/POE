@@ -17,9 +17,14 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.Scanner;
+import java.util.UUID;
+import javax.lang.model.SourceVersion;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
@@ -275,6 +280,10 @@ public class Login extends JFrame {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new Login());
     }
+
+    SourceVersion getSupportedSourceVersion() {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
 }
 
 /*
@@ -388,6 +397,9 @@ public class Login extends JFrame {
 
         JButton exitButton = new JButton("Exit");
         inputPanel.add(exitButton);
+        
+        JButton logoutButton = new JButton("logout");
+        inputPanel.add(logoutButton);
 
         add(inputPanel, BorderLayout.SOUTH);
 
@@ -397,6 +409,7 @@ public class Login extends JFrame {
         deleteButton.addActionListener(e -> deleteLastMessage());
         recoverButton.addActionListener(e -> recoverDeletedMessages());
         exitButton.addActionListener(e -> System.exit(0));
+        
 
         setVisible(true);
     }
@@ -620,3 +633,180 @@ public class Login extends JFrame {
         
     }
 }
+/*  src/poe/Main.java  ─────────────────────────────────────────────
+    Compile :  javac  poe/Main.java
+    Run     :  java   poe.Main
+──────────────────────────────────────────────────────────────────*/
+
+/*─────────────────────────────
+  1.  PLAIN MESSAGE OBJECT
+─────────────────────────────*/
+class Message {
+    String id;
+    String sender;
+    String recipient;
+    String body;
+    String hash;
+
+    Message(String sender, String recipient, String body) {
+        this.id        = UUID.randomUUID().toString();
+        this.sender    = sender;
+        this.recipient = recipient;
+        this.body      = body;
+        this.hash      = sha256(body);
+    }
+
+    /* helper */
+    static String sha256(String txt) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = md.digest(txt.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : bytes) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) { return ""; }
+    }
+
+    /* persistence helpers */
+    String serialise() {
+        return id + "|" + sender + "|" + recipient + "|" + body.replace("|","/") + "|" + hash;
+    }
+    static Message parse(String line) {
+        String[] p = line.split("\\|", 5);
+        if (p.length != 5) return null;
+        Message m = new Message(p[1], p[2], p[3]);
+        m.id   = p[0];
+        m.hash = p[4];
+        return m;
+    }
+
+    @Override public String toString() {
+        return "[" + id + "] " + sender + " → " + recipient + " : " + body;
+    }
+}
+
+/*─────────────────────────────
+  2.  SIMPLE REPOSITORY
+─────────────────────────────*/
+class Repo {
+    /* explicit java.util so no class-shadowing can break generics */
+    static java.util.List<Message> sent        = new java.util.ArrayList<>();
+    static java.util.List<Message> disregarded = new java.util.ArrayList<>();
+    static java.util.List<Message> stored      = new java.util.ArrayList<>();
+    static java.util.List<String>  hashes      = new java.util.ArrayList<>();
+    static java.util.List<String>  ids         = new java.util.ArrayList<>();
+
+    /* mutate */
+    static void recordSent(Message m)        { add(m, sent);        }
+    static void recordDisregarded(Message m) { add(m, disregarded); }
+    private static void add(Message m, java.util.List<Message> list) {
+        list.add(m); hashes.add(m.hash); ids.add(m.id);
+    }
+
+    /* persistence (plain txt) */
+    static void load(String file) {
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String ln;
+            while ((ln = br.readLine()) != null) {
+                Message m = Message.parse(ln);
+                if (m != null) { stored.add(m); hashes.add(m.hash); ids.add(m.id); }
+            }
+        } catch (IOException ignored) { }
+    }
+    static void save(String file) {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(file))) {
+            for (Message m : sent) pw.println(m.serialise());
+        } catch (IOException ignored) { }
+    }
+
+    /* required features */
+    static void listSendersRecipients() {
+        for (Message m : sent) System.out.println(m.sender + " → " + m.recipient);
+    }
+    static void showLongest() {
+        Message longest = null;
+        for (Message m : sent)
+            if (longest == null || m.body.length() > longest.body.length()) longest = m;
+        System.out.println(longest == null ? "No messages" : longest);
+    }
+    static Message findById(String id) {
+        for (Message m : sent) if (m.id.equals(id)) return m; return null;
+    }
+
+    /* ←─ you asked to keep THIS signature ─────────────────────── */
+    static java.util.List<Message> findByRecipient(String recipient) {
+        java.util.List<Message> result = new java.util.ArrayList<>();
+        for (Message m : sent) {
+            if (m.recipient.equalsIgnoreCase(recipient)) {
+                result.add(m);
+            }
+        }
+        return result;
+    }
+    /* ──────────────────────────────────────────────────────────── */
+
+    static boolean deleteByHash(String h) {
+        Iterator<Message> it = sent.iterator();
+        while (it.hasNext()) {
+            Message m = it.next();
+            if (m.hash.equals(h)) { it.remove(); hashes.remove(h); return true; }
+        }
+        return false;
+    }
+    static void report() {
+        System.out.println("──── SENT MESSAGES ────");
+        for (Message m : sent) System.out.println(m);
+        System.out.println("───────────────────────");
+        
+        Repo.load("messages.txt");              // bring previous run into memory
+Scanner in = new Scanner(System.in);
+        String user = "SL_M";                   // fake login
+
+loop:
+while (true) {
+    System.out.println("""
+        1  Send message
+        2  List sender → recipient
+        3  Longest message
+        4  Find by ID
+        5  Messages for recipient
+        6  Delete by hash
+        7  Full report
+        0  Exit""");
+    switch (in.nextLine().trim()) {
+        case "1" -> {
+            System.out.print("Recipient: "); String r = in.nextLine();
+            System.out.print("Body     : "); String b = in.nextLine();
+            Message m = new Message(user, r, b);
+            if (b.trim().length() < 3) Repo.recordDisregarded(m);
+            else Repo.recordSent(m);
+            System.out.println("Sent (ID=" + m.id + ")");
+        }
+        case "2" -> Repo.listSendersRecipients();
+        case "3" -> Repo.showLongest();
+        case "4" -> {
+            System.out.print("ID: ");
+            Message m = Repo.findById(in.nextLine());
+            System.out.println(m==null? "Not found" : m);
+        }
+        case "5" -> {
+            System.out.print("Recipient: ");
+            String r = in.nextLine();
+            for (Message m : Repo.findByRecipient(r)) {
+                System.out.println(m);
+            }
+        }
+        case "6" -> {
+            System.out.print("Hash: ");
+            System.out.println(Repo.deleteByHash(in.nextLine()) ? "Deleted" : "Not found");
+        }
+        case "7" -> Repo.report();
+        case "0" -> { break loop; }
+        default  -> System.out.println("Bad option");
+    }
+}
+Repo.save("messages.txt");               // persist for next run
+System.out.println("Good-bye!");
+
+    }
+}    
